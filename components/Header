@@ -1,0 +1,46 @@
+
+import React from 'react';
+import { View } from '../types';
+import { BookOpenIcon, PencilSquareIcon, SparklesIcon } from './Icons';
+
+interface HeaderProps {
+  currentView: View;
+  setCurrentView: (view: View) => void;
+}
+
+const Header: React.FC<HeaderProps> = ({ currentView, setCurrentView }) => {
+  const navItems = [
+    { id: 'feed', label: 'Journal', icon: <BookOpenIcon /> },
+    { id: 'editor', label: 'New Entry', icon: <PencilSquareIcon /> },
+    { id: 'insights', label: 'Insights', icon: <SparklesIcon /> },
+  ];
+
+  return (
+    <header className="bg-stone-100 border-b border-stone-200 sticky top-0 z-10">
+      <nav className="max-w-3xl mx-auto flex items-center justify-between p-4">
+        <div className="flex items-center gap-2">
+           <BookOpenIcon className="w-8 h-8 text-teal-600"/>
+           <h1 className="text-xl font-bold text-stone-800 tracking-tight">Chronicle AI</h1>
+        </div>
+        <div className="flex items-center gap-2 sm:gap-4">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setCurrentView(item.id as View)}
+              className={`flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                currentView === item.id
+                  ? 'bg-teal-600 text-white'
+                  : 'text-stone-600 hover:bg-stone-200 hover:text-stone-900'
+              }`}
+            >
+              {item.icon}
+              <span className="hidden sm:inline">{item.label}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
+    </header>
+  );
+};
+
+export default Header;
