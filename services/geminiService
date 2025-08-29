@@ -1,0 +1,134 @@
+
+import { GoogleGenAI, Type, GenerateContentResponse, Part } from "@google/genai";
+import { JournalEntry, AIAnalysis, Perspective } from '../types';
+
+const API_KEY = process.env.API_KEY;
+if (!API_KEY) {
+  // In a real app, you'd want to handle this more gracefully.
+  // For this context, we assume the key is available.
+  console.warn("API_KEY environment variable not set.");
+}
+
+const ai = new GoogleGenAI({ apiKey: API_KEY });
+
+const analysisSchema = {
+  type: Type.OBJECT,
+  properties: {
+    summary: {
+      type: Type.ARRAY,
+      description: "A concise 3-bullet point summary of the entry.",
+      items: { type: Type.STRING },
+    },
+    tags: {
+      type: Type.ARRAY,
+      description: "Relevant, non-intrusive tags (e.g., #work, #relationships, #self-reflection).",
+      items: { type: Type.STRING },
+    },
+    sentiment: {
+      type: Type.STRING,
+      description: "The primary sentiment of the text (e.g., 'Positive', 'Negative', 'Neutral', 'Mixed').",
+    },
+    acknowledgement: {
+        type: Type.STRING,
+        description: "If the sentiment is strongly positive or negative, provide a simple, validating acknowledgement. Otherwise, this can be an empty string.",
+    },
+    socraticQuestion: {
+        type: Type.STRING,
+        description: "Based on a core theme, generate one open-ended Socratic question to encourage deeper reflection. If no clear theme, this can be an empty string.",
+    },
+  },
+  required: ["summary", "tags", "sentiment", "acknowledgement", "socraticQuestion"],
+};
+
+export const analyzeEntry = async (text: string, photo?: { base64: string; mimeType: string }): Promise<AIAnalysis> => {
+  try {
+    const parts: Part[] = [{ text: `You are an intelligent, reflective journaling assistant. Your purpose is to listen intently, ask insightful questions, and hold up a mirror to the user's own thoughts. Your tone is empathetic, curious, humble, and concise. You prioritize questions over statements. Analyze the following journal entry and provide your analysis in the requested JSON format. The user's entry is:\n\n---\n${text}\n---` }];
+
+    if (photo) {
+      parts.unshift({
+        inlineData: {
+          data: photo.base64,
+          mimeType: photo.mimeType,
+        },
+      });
+       parts.push({text: "\nAlso consider the attached photo in your analysis and prompts."});
+    }
+
+    const response: GenerateContentResponse = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: { parts },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: analysisSchema,
+      },
+    });
+
+    const jsonString = response.text;
+    const parsed = JSON.parse(jsonString);
+    
+    // Ensure all fields are present, even if empty, to match the AIAnalysis type.
+    return {
+        summary: parsed.summary || [],
+        tags: parsed.tags || [],
+        sentiment: parsed.sentiment || 'Neutral',
+        acknowledgement: parsed.acknowledgement || undefined,
+        socraticQuestion: parsed.socraticQuestion || undefined,
+    };
+
+  } catch (error) {
+    console.error("Error analyzing entry:", error);
+    throw new Error("Failed to analyze the journal entry.");
+  }
+};
+
+
+const generatePerspective = async (title: string, prompt: string): Promise<Perspective> => {
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+        });
+        return { title, content: response.text };
+    } catch(error) {
+        console.error(`Error generating perspective for ${title}:`, error);
+        return { title, content: "Could not generate this perspective at the moment." };
+    }
+}
+
+export const getPerspectives = async (entryText: string): Promise<Perspective[]> => {
+    const prompts = [
+        {
+            title: "The Objective Observer",
+            prompt: `Read the following journal entry. Rewrite it focusing only on the objective facts, separating them from emotional interpretations and stories. What happened vs. what was felt about it?\n\nEntry:\n"${entryText}"`
+        },
+        {
+            title: "The Compassionate Friend",
+            prompt: `Read the following journal entry. Imagine your closest friend wrote this and shared it with you. What would you say to them to show compassion, validation, and support, without giving unsolicited advice?\n\nEntry:\n"${entryText}"`
+        },
+        {
+            title: "The Future Self",
+            prompt: `Read the following journal entry. From the perspective of five years in the future—wiser and with more experience—what perspective or gentle advice would you offer to the person who wrote this? How might this moment look from a distance?\n\nEntry:\n"${entryText}"`
+        }
+    ];
+
+    return Promise.all(prompts.map(p => generatePerspective(p.title, p.prompt)));
+};
+
+export const generateInsights = async (entries: JournalEntry[]): Promise<string> => {
+    if (entries.length < 3) {
+        return "Not enough entries to generate insights. Keep journaling to discover patterns over time!";
+    }
+    const entriesText = entries.map(e => `Date: ${e.date}\nTags: ${e.aiAnalysis?.tags.join(', ') || 'N/A'}\nEntry:\n${e.text}`).join('\n\n---\n\n');
+    const prompt = `You are a personal analyst AI. Your task is to identify subtle, long-term correlations and patterns from a user's journal entries. Present your findings as gentle, encouraging observations. Do not give advice. Focus on connections between actions, environments, and feelings.\n\nHere are the user's entries:\n\n${entriesText}\n\nBased on these entries, what are some potential patterns or insights?`;
+    
+    try {
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+        });
+        return response.text;
+    } catch (error) {
+        console.error("Error generating insights:", error);
+        throw new Error("Failed to generate insights.");
+    }
+};
